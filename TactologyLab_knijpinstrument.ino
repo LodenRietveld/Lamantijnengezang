@@ -182,7 +182,8 @@ HAL_SensorTracker* sensors[NUM_HAL_SENSORS] = {&hal1, &hal2, &hal3};
 
 N_SineInterpolator waveform_interpolator_sine(NUM_OSCILLATORS, 0.2, 0.7);
 
-LPF deltaSmoother(0.9999);
+LPF hal1_deltaSmoother(0.9999);
+LPF hal2_deltaSmoother(0.9999);
 
 elapsedMillis vibrato_timer = 0;
 float vibrato_phase = 0;
@@ -407,7 +408,7 @@ uint16_t loopcount = 0;
 void loop() {
 
   if (vibrato_timer > VIBRATO_UPDATE_TIME-1){
-    freq_mult = (sin(vibrato_phase) * VIBRATO_AMT) + 1.;
+    freq_mult = (sin(vibrato_phase) * (VIBRATO_AMT + (hal2_deltaSmoother.get() * 0.02))) + 1.;
     vibrato_phase += vibrato_speed;
     vibrato_timer = 0;
   }
@@ -423,16 +424,17 @@ void loop() {
     wave_oscillators[i]->frequency(note_freqs[i / NUM_OSCILLATORS] * freq_mult);
   }
 
-    chorusMixer1.gain(0, 1. - hal1.get_scaled_value());
-    chorusMixer1.gain(1, hal1.get_scaled_value());
-    chorusMixer2.gain(0, 1. - hal1.get_scaled_value());
-    chorusMixer2.gain(1, hal1.get_scaled_value());
-    verbMixerL.gain(1, 1. - hal1.get_scaled_value());
-    verbMixerL.gain(0, hal1.get_scaled_value());
-    verbMixerR.gain(1, 1. - hal1.get_scaled_value());
-    verbMixerR.gain(0, hal1.get_scaled_value());
-    noise_mixer.gain(0, 1. - (hal1.get_scaled_value() / 5.));
-    noise_mixer.gain(1, hal1.get_scaled_value() / 5.);
+  float delta_diff = constrain(abs(hal1_deltaSmoother.get() - hal2_deltaSmoother.get()), 0., 1.);
+  chorusMixer1.gain(0, delta_diff);
+  chorusMixer1.gain(1, 1. - delta_diff);
+  chorusMixer2.gain(0, delta_diff);
+  chorusMixer2.gain(1, 1. - delta_diff);
+  verbMixerL.gain(1, 1. - hal1.get_scaled_value());
+  verbMixerL.gain(0, hal1.get_scaled_value());
+  verbMixerR.gain(1, 1. - hal1.get_scaled_value());
+  verbMixerR.gain(0, hal1.get_scaled_value());
+  noise_mixer.gain(0, 1. - (hal1.get_scaled_value() / 5.));
+  noise_mixer.gain(1, hal1.get_scaled_value() / 5.);
 
   AudioInterrupts();
   
@@ -443,15 +445,17 @@ void loop() {
     }
   }
 
-  deltaSmoother.set_if_greater(hal1.get_delta());
+  hal1_deltaSmoother.set_if_greater(hal1.get_delta());
+  hal2_deltaSmoother.set_if_greater(hal2.get_delta());
 
   float chord_interpolator = constrain(hal2.get_scaled_value(), 0., 0.999999) * 5;
-  filter_freq_mult = hal1.get_delta() + deltaSmoother.get();
+  filter_freq_mult = hal1.get_delta() + hal1_deltaSmoother.get();
 
   interpolate_waveforms(&waveform_interpolator_sine);
   interpolate_notes(chord_interpolator);
 
-  deltaSmoother.slow_tail_to_zero();
+  hal1_deltaSmoother.slow_tail_to_zero();
+  hal2_deltaSmoother.slow_tail_to_zero();
   waveform_interpolator_sine.update();
 
 #ifdef DEBUG

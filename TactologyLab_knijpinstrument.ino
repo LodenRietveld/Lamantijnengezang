@@ -406,87 +406,17 @@ uint16_t loopcount = 0;
 
 
 void loop() {
-
-  if (vibrato_timer > VIBRATO_UPDATE_TIME-1){
-    freq_mult = (sin(vibrato_phase) * (VIBRATO_AMT + (hal2_deltaSmoother.get() * 0.02))) + 1.;
-    vibrato_phase += vibrato_speed;
-    vibrato_timer = 0;
-  }
-
+  update_vibrato();
   AudioNoInterrupts();
-  
-  for (int i = 0; i < NUM_OSCILLATORS; i++){
-    filters[i]->setLowpass(0, filter_freqs[i] * (filter_freq_mult + 1) * FILTER_CHANGE_AMT , 0.7);
-    filters[i]->setLowpass(1, filter_freqs[i] * (filter_freq_mult + 1) * FILTER_CHANGE_AMT , 0.7);
-  }
 
-  for (int i = 0; i < NUM_WAVE_OSCILLATORS; i++){
-    wave_oscillators[i]->frequency(note_freqs[i / NUM_OSCILLATORS] * freq_mult);
-  }
-
-  float delta_diff = constrain(abs(hal1_deltaSmoother.get() - hal2_deltaSmoother.get()), 0., 1.);
-  chorusMixer1.gain(0, delta_diff);
-  chorusMixer1.gain(1, 1. - delta_diff);
-  chorusMixer2.gain(0, delta_diff);
-  chorusMixer2.gain(1, 1. - delta_diff);
-  verbMixerL.gain(1, 1. - hal1.get_scaled_value());
-  verbMixerL.gain(0, hal1.get_scaled_value());
-  verbMixerR.gain(1, 1. - hal1.get_scaled_value());
-  verbMixerR.gain(0, hal1.get_scaled_value());
-  noise_mixer.gain(0, 1. - (hal1.get_scaled_value() / 5.));
-  noise_mixer.gain(1, hal1.get_scaled_value() / 5.);
+  set_filter_oscillator_freqs();
+  set_effect_mixers();
 
   AudioInterrupts();
-  
-  if (hal_delta_time > HAL_DELTA_PERIOD){
-    for (int i = 0; i < NUM_HAL_SENSORS; i++){
-      sensors[i]->set_value(analogRead(sensors[i]->get_pin()));
-      hal_delta_time = 0;
-    }
-  }
 
-  hal1_deltaSmoother.set_if_greater(hal1.get_delta());
-  hal2_deltaSmoother.set_if_greater(hal2.get_delta());
-
-  float chord_interpolator = constrain(hal2.get_scaled_value(), 0., 0.999999) * 5;
-  filter_freq_mult = hal1.get_delta() + hal1_deltaSmoother.get();
-
-  interpolate_waveforms(&waveform_interpolator_sine);
-  interpolate_notes(chord_interpolator);
-
-  hal1_deltaSmoother.slow_tail_to_zero();
-  hal2_deltaSmoother.slow_tail_to_zero();
-  waveform_interpolator_sine.update();
-
-#ifdef DEBUG
-  if (millis() % 200 < 1){
-    Serial.print("HAL value: ");
-    Serial.println(analogRead(hal2.pin));
-    Serial.print("Phase: ");
-    Serial.print(vibrato_phase);
-    Serial.print("\t Freq: ");
-    Serial.println(freq_mult); 
-  }
-#endif
-}
-
-
-float mtof(uint8_t midival) {
-  return 8.1757989156 * pow(2.0, midival/12.0);
-}
-
-
-float scale_HAL_values(HAL_SensorTracker* sensor, uint16_t reading, float range){
-  return ((reading - sensor->get_low()) / ((float)sensor->get_high() - sensor->get_low())) * range;
-}
-
-
-float scale_STRETCH_values(uint16_t reading, float range){
-  if (reading < 751){
-    return (1. - ((reading - 650) / 120.)) * range;
-  } else {
-    return filter_freq_mult; 
-  }
+  read_sensors_update_data_structures();
+  set_values_and_interpolators();
+  update_trackers();
 }
 
 void interpolate_waveforms(N_SineInterpolator* interpolator){
@@ -518,14 +448,94 @@ void interpolate_notes(float interpolator){
     float freq_diff = abs(mtof(notes[idx_1][i]) - mtof(notes[idx_2][i]));
     
     note_freqs[i] = base_freq + (freq_diff * bounded_interpolator);
+  }
+}
 
-#ifdef DEBUG
-    if (i == 0){
-      Serial.print("Note ");
-      Serial.print(i);
-      Serial.print(" frequency: ");
-      Serial.println(note_freqs[i]);
+
+
+void update_vibrato(){
+  if (vibrato_timer > VIBRATO_UPDATE_TIME-1){
+    freq_mult = (sin(vibrato_phase) * (VIBRATO_AMT + (hal2_deltaSmoother.get() * 0.02))) + 1.;
+    vibrato_phase += vibrato_speed;
+    vibrato_timer = 0;
+  }
+}
+
+void set_filter_oscillator_freqs(){
+  for (int i = 0; i < NUM_OSCILLATORS; i++){
+    filters[i]->setLowpass(0, filter_freqs[i] * (filter_freq_mult + 1) * FILTER_CHANGE_AMT , 0.7);
+    filters[i]->setLowpass(1, filter_freqs[i] * (filter_freq_mult + 1) * FILTER_CHANGE_AMT , 0.7);
+  }
+
+  for (int i = 0; i < NUM_WAVE_OSCILLATORS; i++){
+    wave_oscillators[i]->frequency(note_freqs[i / NUM_OSCILLATORS] * freq_mult);
+  }
+}
+
+void set_effect_mixers(){
+  float delta_diff = constrain(abs(hal1_deltaSmoother.get() - hal2_deltaSmoother.get()), 0., 1.);
+  
+  chorusMixer1.gain(0, delta_diff);
+  chorusMixer1.gain(1, 1. - delta_diff);
+  chorusMixer2.gain(0, delta_diff);
+  chorusMixer2.gain(1, 1. - delta_diff);
+  verbMixerL.gain(1, 1. - hal1.get_scaled_value());
+  verbMixerL.gain(0, hal1.get_scaled_value());
+  verbMixerR.gain(1, 1. - hal1.get_scaled_value());
+  verbMixerR.gain(0, hal1.get_scaled_value());
+  noise_mixer.gain(0, 1. - (hal1.get_scaled_value() / 5.));
+  noise_mixer.gain(1, hal1.get_scaled_value() / 5.);
+}
+
+void read_sensors_update_data_structures(){
+    if (hal_delta_time > HAL_DELTA_PERIOD){
+    for (int i = 0; i < NUM_HAL_SENSORS; i++){
+      sensors[i]->set_value(analogRead(sensors[i]->get_pin()));
+      hal_delta_time = 0;
     }
-#endif
+  }
+
+  hal1_deltaSmoother.set_if_greater(hal1.get_delta());
+  hal2_deltaSmoother.set_if_greater(hal2.get_delta());
+}
+
+void set_values_and_interpolators(){
+  float chord_interpolator = constrain(hal2.get_scaled_value(), 0., 0.999999) * 5;
+  filter_freq_mult = hal1.get_delta() + hal1_deltaSmoother.get();
+
+  interpolate_waveforms(&waveform_interpolator_sine);
+  interpolate_notes(chord_interpolator);
+}
+
+void update_trackers(){
+  hal1_deltaSmoother.slow_tail_to_zero();
+  hal2_deltaSmoother.slow_tail_to_zero();
+  waveform_interpolator_sine.update();
+}
+
+
+
+
+
+
+///////////UTIL////////////
+
+
+
+float mtof(uint8_t midival) {
+  return 8.1757989156 * pow(2.0, midival/12.0);
+}
+
+
+float scale_HAL_values(HAL_SensorTracker* sensor, uint16_t reading, float range){
+  return ((reading - sensor->get_low()) / ((float)sensor->get_high() - sensor->get_low())) * range;
+}
+
+
+float scale_STRETCH_values(uint16_t reading, float range){
+  if (reading < 751){
+    return (1. - ((reading - 650) / 120.)) * range;
+  } else {
+    return filter_freq_mult; 
   }
 }

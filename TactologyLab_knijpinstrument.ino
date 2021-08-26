@@ -180,7 +180,7 @@ HAL_SensorTracker hal3(HAL3_PIN, 520, 800, false, 3);
 
 HAL_SensorTracker* sensors[NUM_HAL_SENSORS] = {&hal1, &hal2, &hal3};
 
-N_SineInterpolator waveform_interpolator_sine(1, 0.2, 0.7);
+N_SineInterpolator waveform_interpolator_sine(NUM_OSCILLATORS, 0.2, 0.7);
 
 LPF deltaSmoother(0.9999);
 
@@ -195,8 +195,6 @@ elapsedMillis hal_delta_time = 0;
 
 short chorus_array_l[CHORUS_DELAY_LENGTH];
 short chorus_array_r[CHORUS_DELAY_LENGTH];
-
-float waveform_interpolator = 0;
 
 uint8_t notes[NUM_CHORDS][NUM_OSCILLATORS] = {{48, 52, 55, 59}, {50, 52, 55, 57}, {50, 52, 57, 62}, {52, 55, 57, 60}, {50, 52, 55, 60}};
 float note_freqs[NUM_OSCILLATORS];
@@ -425,7 +423,6 @@ void loop() {
     wave_oscillators[i]->frequency(note_freqs[i / NUM_OSCILLATORS] * freq_mult);
   }
 
-//  if (waveform_interpolator < 1){
     chorusMixer1.gain(0, 1. - hal1.get_scaled_value());
     chorusMixer1.gain(1, hal1.get_scaled_value());
     chorusMixer2.gain(0, 1. - hal1.get_scaled_value());
@@ -436,7 +433,6 @@ void loop() {
     verbMixerR.gain(0, hal1.get_scaled_value());
     noise_mixer.gain(0, 1. - (hal1.get_scaled_value() / 5.));
     noise_mixer.gain(1, hal1.get_scaled_value() / 5.);
-//  }
 
   AudioInterrupts();
   
@@ -447,13 +443,12 @@ void loop() {
     }
   }
 
-  deltaSmoother.set_if_greater(hal2.get_delta());
-  waveform_interpolator = hal1.get_scaled_value() * 4;
+  deltaSmoother.set_if_greater(hal1.get_delta());
 
   float chord_interpolator = constrain(hal2.get_scaled_value(), 0., 0.999999) * 5;
-  filter_freq_mult = hal1.get_delta()+ deltaSmoother.get();
+  filter_freq_mult = hal1.get_delta() + deltaSmoother.get();
 
-  interpolate_waveforms(waveform_interpolator);
+  interpolate_waveforms(&waveform_interpolator_sine);
   interpolate_notes(chord_interpolator);
 
   deltaSmoother.slow_tail_to_zero();
@@ -490,11 +485,12 @@ float scale_STRETCH_values(uint16_t reading, float range){
   }
 }
 
-void interpolate_waveforms(float waveform_interpolator){
-  uint8_t this_waveform = waveform_interpolator;
-  uint8_t next_waveform = this_waveform + 1;
-
+void interpolate_waveforms(N_SineInterpolator* interpolator){
   for (int i = 0; i < NUM_OSCILLATORS; i++){
+    float waveform_interpolator = interpolator->get(i);
+    
+    uint8_t this_waveform = waveform_interpolator;
+    uint8_t next_waveform = this_waveform + 1;
     for (int j = 0; j < NUM_WAVEFORMS; j++){
       if (j == this_waveform){
         osc_mixers[i]->gain(j, 1. - (waveform_interpolator - this_waveform));

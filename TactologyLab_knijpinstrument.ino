@@ -539,3 +539,29 @@ float scale_STRETCH_values(uint16_t reading, float range){
     return filter_freq_mult; 
   }
 }
+
+
+float debug_print_value(char* label, float minval, float maxval, float val, bool line_end){
+  char strbuf[100];
+  
+  strcpy(strbuf, label);
+  strcat(strbuf, "_min:");
+  Serial.print(strbuf);
+  Serial.print(minval);
+  
+  strcpy(strbuf, ",");
+  strcat(strbuf, label);
+  strcat(strbuf, "_max:");
+  Serial.print(strbuf);
+  Serial.print(maxval);
+  
+  Serial.print(",");
+  Serial.print(label);
+  Serial.print(":");
+  if (line_end){
+    Serial.println(val);
+  } else {
+    Serial.print(val);
+    Serial.print(",");
+  }
+}

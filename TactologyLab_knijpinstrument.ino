@@ -190,9 +190,6 @@ float vibrato_speed = 0.0001;
 float freq_mult = 1;
 float filter_freq_mult = 0;
 
-float hal_value[NUM_HAL_SENSORS] = {0, 0, 0};
-float prev_hal_value[NUM_HAL_SENSORS] = {0, 0, 0};
-float delta_hal_value[NUM_HAL_SENSORS] = {0, 0, 0};
 elapsedMillis hal_delta_time = 0;
 
 
@@ -204,8 +201,6 @@ float waveform_interpolator = 0;
 uint8_t notes[NUM_CHORDS][NUM_OSCILLATORS] = {{48, 52, 55, 59}, {50, 52, 55, 57}, {50, 52, 57, 62}, {52, 55, 57, 60}, {50, 52, 55, 60}};
 float note_freqs[NUM_OSCILLATORS];
 float filter_freqs[NUM_OSCILLATORS];
-
-float mtof(uint8_t in);
 
 uint8_t waveforms[] = {WAVEFORM_SINE, WAVEFORM_TRIANGLE, WAVEFORM_SAWTOOTH, WAVEFORM_SQUARE};
 
@@ -456,14 +451,13 @@ void loop() {
   waveform_interpolator = hal1.get_scaled_value() * 4;
 
   float chord_interpolator = constrain(hal2.get_scaled_value(), 0., 0.999999) * 5;
-  filter_freq_mult = delta_hal_value[0] + deltaSmoother.get();
+  filter_freq_mult = hal1.get_delta()+ deltaSmoother.get();
 
-  interpolate_waveforms(waveform_interpolator_sine.get(0));
+  interpolate_waveforms(waveform_interpolator);
   interpolate_notes(chord_interpolator);
 
   deltaSmoother.slow_tail_to_zero();
   waveform_interpolator_sine.update();
-//  Serial.println(deltaSmoother.get());
 
 #ifdef DEBUG
   if (millis() % 200 < 1){

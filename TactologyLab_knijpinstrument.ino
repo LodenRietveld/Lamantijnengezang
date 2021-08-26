@@ -448,14 +448,11 @@ void loop() {
   if (hal_delta_time > HAL_DELTA_PERIOD){
     for (int i = 0; i < NUM_HAL_SENSORS; i++){
       sensors[i]->set_value(analogRead(sensors[i]->get_pin()));
-      prev_hal_value[i] = hal_value[i];
-      hal_value[i] = scale_HAL_values(sensors[i], analogRead(sensors[i]->get_pin()), 1);
-      delta_hal_value[i] = hal_value[i] - prev_hal_value[i];
       hal_delta_time = 0;
     }
   }
 
-  deltaSmoother.set_if_greater(abs(delta_hal_value[1]));
+  deltaSmoother.set_if_greater(hal2.get_delta());
   waveform_interpolator = hal1.get_scaled_value() * 4;
 
   float chord_interpolator = constrain(hal2.get_scaled_value(), 0., 0.999999) * 5;

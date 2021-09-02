@@ -176,8 +176,8 @@ AudioConnection          verbMixCordR(freeverb2, 0, verbMixerR, 0);
 AudioConnection          dryMixCordL(mixer7, 0, verbMixerL, 1);
 AudioConnection          dryMixCordR(mixer8, 0, verbMixerR, 1);
 
-AudioConnection          patchCord29(freeverb1, 0, mixer6, 1);
-AudioConnection          patchCord30(freeverb2, 0, mixer6, 2);
+AudioConnection          patchCord29(verbMixerL, 0, mixer6, 1);
+AudioConnection          patchCord30(verbMixerR, 0, mixer6, 2);
 //AudioConnection          patchCord31(mixer6, 0, mixer7, 1);
 //AudioConnection          patchCord32(mixer6, 0, mixer8, 1);
 AudioConnection          patchCord33(mixer6, 0, i2s1, 0);
@@ -209,20 +209,20 @@ void setup() {
     osc_mixers[i / NUM_OSCILLATORS]->gain(i % NUM_WAVEFORMS, (i % NUM_WAVEFORMS) == 0 ? 1 : 0);
   }
 
-  mixer5.gain(0, .3);
-  mixer5.gain(1, .3);
-  mixer5.gain(2, .3);
-  mixer5.gain(3, .3);
+  mixer5.gain(0, .5);
+  mixer5.gain(1, .5);
+  mixer5.gain(2, .5);
+  mixer5.gain(3, .5);
 
   noise_mixer.gain(0, .8);
   noise_mixer.gain(1, .2);
   noiseAM.amplitude(1.);
   noise_offset.amplitude(1.);
 
-  verbMixerL.gain(0, 0.3);
-  verbMixerL.gain(1, 0.3);
-  verbMixerR.gain(0, 0.3);
-  verbMixerR.gain(1, 0.3);
+  verbMixerL.gain(0, 0.5);
+  verbMixerL.gain(1, 0.5);
+  verbMixerR.gain(0, 0.5);
+  verbMixerR.gain(1, 0.5);
 
   chorus1.begin(chorus_array_l, CHORUS_DELAY_LENGTH, 2);
   chorus2.begin(chorus_array_r, CHORUS_DELAY_LENGTH, 2);
@@ -241,8 +241,8 @@ void setup() {
   mixer8.gain(0, 1.);
   mixer8.gain(1, 0.);
 
-  mixer6.gain(1, 0.5);
-  mixer6.gain(2, 0.5);
+  mixer6.gain(1, 0.7);
+  mixer6.gain(2, 0.7);
   
   waveform_interpolator_sine.update();
 }

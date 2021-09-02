@@ -3,163 +3,15 @@
 #include <SPI.h>
 #include <SD.h>
 #include <SerialFlash.h>
-
-
-class N_SineInterpolator{
-  float phase;
-  float low_freq, high_freq;
-  int number;
-  float* frequency;
-  float* frequency_mod;
-  float* current_value;
-
-public:
-  N_SineInterpolator(int number, float low_freq, float high_freq){
-    this->number = number;
-    this->low_freq = low_freq;
-    this->high_freq = high_freq;
-    frequency = (float*) malloc(sizeof(float)* number);
-    frequency_mod = (float*) malloc(sizeof(float)* number);
-    current_value = (float*) malloc(sizeof(float)* number);
-
-    for (int i = 0; i < number; i++){
-      frequency[i] = random(low_freq, high_freq);
-    }
-  }
-
-  float add_to_frequency(uint8_t idx, float added_amt){
-    frequency_mod[idx] = added_amt;
-  }
-
-  void update(){
-    phase += 0.0001;
-
-    for (int i = 0; i < number; i++){
-      current_value[i] = (sin(phase * (frequency[i] + frequency_mod[i])) + 1) / 2.;
-    }
-  }
-
-  float get(uint8_t idx){
-    if (idx < number){
-      return current_value[idx];
-    }
-    
-    return -1;
-  }
-};
-
-
-class HAL_SensorTracker {
-  uint8_t pin;
-  uint16_t low;
-  uint16_t high;
-  bool is_invert;
-  float scale_amount;
-  uint16_t raw_value;
-  float scaled_value;
-  float old_scaled_value;
-  float delta_value;
-  
-public:
-  HAL_SensorTracker(uint8_t pin, uint16_t low, uint16_t high, bool is_invert, float scale_amount){
-    this->pin = pin;
-    this->low = low;
-    this->high = high;
-    this->is_invert = is_invert;
-    this->scale_amount = scale_amount;
-  }
-
-  void set_value(uint16_t new_value){
-    scale_HAL_values(new_value, scale_amount);
-    calculate_delta();
-    raw_value = new_value;
-  }
-
-  void calculate_delta(){
-    delta_value = abs(scaled_value - old_scaled_value);
-    old_scaled_value = scaled_value;
-  }
-
-  float get_scaled_value(){
-    return scaled_value;
-  }
-
-  float get_delta(){
-    return delta_value;
-  }
-
-  uint8_t get_pin(){
-    return pin;
-  }
-
-  uint16_t get_low(){
-    return low;
-  }
-
-  uint16_t get_high(){
-    return high;
-  }
-
-  float scale_HAL_values(uint16_t reading, float range){
-    float t_scaled_val = ((reading - low) / ((float) (high - low))) * range;
-    if (is_invert){
-      scaled_value = 1. - t_scaled_val;
-    } else {
-      scaled_value = t_scaled_val;
-    }
-    return t_scaled_val;
-  }
-};
-
-class LPF {
-  float lowpassed = 0;
-  float lowpass_amount = 0.97;
-
-public:
-  LPF(float lowpass_amount){
-    this->lowpass_amount = lowpass_amount;
-  }
-
-  void set_value(float new_val){
-    lowpassed = (lowpassed * lowpass_amount) + ((1. - lowpass_amount) * new_val);
-  }
-
-  void set_value_force(float new_val){
-    lowpassed = new_val;
-  }
-
-  void set_if_greater(float new_val){
-    if (new_val > lowpassed){
-      lowpassed = new_val;
-    }
-  }
-
-  void slow_tail_to_zero(){
-#ifdef DEBUG
-    Serial.print("Pre: ");
-    Serial.print(lowpassed);
-    Serial.print("\tfactor: ");
-    Serial.println(lowpass_amount);
-#endif
-    lowpassed = lowpassed * lowpass_amount;
-  }
-
-  void set_lowpass_amount(float amount){
-    this->lowpass_amount = amount;
-  }
-
-  float get(){
-    return lowpassed;
-  }
-};
-
+#include "classes.h"
 
 #define HAL1_PIN                A0
 #define HAL2_PIN                A3
 #define HAL3_PIN                A4
 #define STRETCH_PIN             A2
 
-#define NUM_HAL_SENSORS         3
+#define NUM_HAL_SENSORS         2
+#define MEAN_COUNT              50
 
 #define NUM_OSCILLATORS         4
 #define NUM_WAVEFORMS           4
@@ -178,18 +30,25 @@ HAL_SensorTracker hal1(HAL1_PIN, 520, 800, false, 1);
 HAL_SensorTracker hal2(HAL2_PIN, 240, 500, true, 1);
 HAL_SensorTracker hal3(HAL3_PIN, 520, 800, false, 3);
 
-HAL_SensorTracker* sensors[NUM_HAL_SENSORS] = {&hal1, &hal2, &hal3};
+HAL_SensorTracker* sensors[NUM_HAL_SENSORS] = {&hal1, &hal2};
 
 N_SineInterpolator waveform_interpolator_sine(NUM_OSCILLATORS, 0.2, 0.7);
+N_VolumeInterpolator volume_interpolator(1, 0.1, 0.2);
 
 LPF hal1_deltaSmoother(0.9999);
 LPF hal2_deltaSmoother(0.9999);
+
+float parts[NUM_HAL_SENSORS][MEAN_COUNT] = {0};
+uint8_t part_idx = 0;
+float sensor_mean = 0.;
+float sensor_variance[NUM_HAL_SENSORS] = {0};
 
 elapsedMillis vibrato_timer = 0;
 float vibrato_phase = 0;
 float vibrato_speed = 0.0001;
 float freq_mult = 1;
 float filter_freq_mult = 0;
+float chord_interpolator = 0;
 
 elapsedMillis hal_delta_time = 0;
 
@@ -337,14 +196,6 @@ void setup() {
   
 
   for (int i = 0; i < NUM_OSCILLATORS; i++){
-#ifdef DEBUG
-    Serial.print("oscillator: ");
-    Serial.print(i);
-    Serial.print("\t note: ");
-    Serial.print(notes[i]);
-    Serial.print("\t frequency: ");
-    Serial.println(mtof(notes[i]));
-#endif
     note_freqs[i] = mtof(notes[0][i]);
     filter_freqs[i] = note_freqs[i];
     filters[i]->setLowpass(0, filter_freqs[i] , 0.7);
@@ -355,12 +206,6 @@ void setup() {
 
   for (int i = 0; i < NUM_WAVE_OSCILLATORS; i++){
     wave_oscillators[i]->begin(0.2, note_freqs[i / NUM_OSCILLATORS], waveforms[i % NUM_WAVEFORMS]);
-#ifdef DEBUG
-    Serial.print("oscillator: ");
-    Serial.print(i/NUM_OSCILLATORS);
-    Serial.print("\t frequency: ");
-    Serial.println(note_freqs[i/NUM_OSCILLATORS]);
-#endif
     osc_mixers[i / NUM_OSCILLATORS]->gain(i % NUM_WAVEFORMS, (i % NUM_WAVEFORMS) == 0 ? 1 : 0);
   }
 
@@ -416,7 +261,7 @@ void loop() {
 
   read_sensors_update_data_structures();
   set_values_and_interpolators();
-  update_trackers();
+  update_trackers(); 
 }
 
 void interpolate_waveforms(N_SineInterpolator* interpolator){
@@ -487,21 +332,68 @@ void set_effect_mixers(){
   noise_mixer.gain(1, hal1.get_scaled_value() / 5.);
 }
 
-void read_sensors_update_data_structures(){
-    if (hal_delta_time > HAL_DELTA_PERIOD){
-    for (int i = 0; i < NUM_HAL_SENSORS; i++){
-      sensors[i]->set_value(analogRead(sensors[i]->get_pin()));
-      hal_delta_time = 0;
-    }
+void read_sensors_update_data_structures(){    
+    if (hal_delta_time > HAL_DELTA_PERIOD){      
+      for (int i = 0; i < NUM_HAL_SENSORS; i++){
+        sensors[i]->set_value(analogRead(sensors[i]->get_pin()));
+        hal_delta_time = 0;
+
+        parts[i][part_idx] = sensors[i]->get_scaled_value();
+      }
+
+      
+      debug_print_value("val1", 0., 1., sensors[0]->get_scaled_value(), false);
+      debug_print_value("val2", 0., 1., sensors[1]->get_scaled_value(), true);
+      
+      calculate_sensor_variance();
+      
+      part_idx++;
+      if (part_idx >= MEAN_COUNT){
+        part_idx = 0;
+      }
   }
 
   hal1_deltaSmoother.set_if_greater(hal1.get_delta());
   hal2_deltaSmoother.set_if_greater(hal2.get_delta());
 }
 
+
+void calculate_sensor_variance(){
+  float variance_mean;
+  
+  for (int sensor_idx = 0; sensor_idx < NUM_HAL_SENSORS; sensor_idx++){
+    sensor_mean = 0;
+    
+    for (int i = 0; i < MEAN_COUNT; i++){
+      sensor_mean += parts[sensor_idx][i];
+    }
+
+    sensor_mean /= MEAN_COUNT;
+
+    variance_mean = 0;
+
+    for (int i = 0; i < MEAN_COUNT; i++){
+      variance_mean += sq(parts[sensor_idx][i] - sensor_mean) * 10;
+    }
+
+    variance_mean /= MEAN_COUNT;
+
+    sensor_variance[sensor_idx] = variance_mean;
+  }
+
+//  debug_print_value("variance1", 0., 1., sensor_variance[0], false);
+//  debug_print_value("variance2", 0., 1., sensor_variance[1], true);
+  
+}
+
 void set_values_and_interpolators(){
-  float chord_interpolator = constrain(hal2.get_scaled_value(), 0., 0.999999) * 5;
-  filter_freq_mult = hal1.get_delta() + hal1_deltaSmoother.get();
+  if (hal2.get_delta() < 0.01){
+    chord_interpolator = constrain(hal2.get_scaled_value(), 0., 0.999999) * 5;
+  }
+  filter_freq_mult = hal1.get_delta() * 100 + hal1_deltaSmoother.get() * 5;
+
+//  debug_print_value("delta", 0., 1., hal1.get_delta(), true);
+  filter_freq_mult += hal1.get_scaled_value() * 3;
 
   interpolate_waveforms(&waveform_interpolator_sine);
   interpolate_notes(chord_interpolator);

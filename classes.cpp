@@ -136,6 +136,14 @@ float HAL_SensorTracker::scale_HAL_values(uint16_t reading, float range){
 
 LPF::LPF(float lowpass_amount){
     this->lowpass_amount = lowpass_amount;
+    this->low_thresh = 0xffff;
+    this->high_thresh = 0xffff;
+    this->gated_value = 0.;
+}
+
+void LPF::set_thresholds(float low, float high){
+    this->low_thresh = low;
+    this->high_thresh = high;
 }
 
 void LPF::set_value(float new_val){
@@ -157,9 +165,29 @@ void LPF::slow_tail_to_zero(){
 }
 
 void LPF::set_lowpass_amount(float amount){
-    this->lowpass_amount = amount;
+    lowpass_amount = amount;
 }
 
 float LPF::get(){
     return lowpassed;
+}
+
+void LPF::update_gate_value(){
+  if (lowpassed < low_thresh && gated_value != 0.){
+    gated_value = 0.;
+    b_gate_changed = true;
+  } else if (lowpassed > high_thresh && gated_value != 1.){
+    gated_value = 1.;
+    b_gate_changed = true;
+  }
+}
+
+float LPF::get_gated_value(){  
+    return gated_value;
+}
+
+bool LPF::gate_changed(){
+  bool out = b_gate_changed;
+  b_gate_changed = false;
+  return out;
 }

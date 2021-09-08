@@ -64,15 +64,24 @@ public:
 class LPF {
   float lowpassed;
   float lowpass_amount;
+  float low_thresh, high_thresh;
+  float gated_value;
+  bool b_gate_changed;
 
 public:
   LPF(float lowpass_amount);
   void set_value(float new_val);
   void set_value_force(float new_val);
   void set_if_greater(float new_val);
+
+  void set_thresholds(float low, float high);
   void slow_tail_to_zero();
   void set_lowpass_amount(float amount);
   float get();
+  
+  float get_gated_value();
+  void update_gate_value();
+  bool gate_changed();
 };
 
 #endif

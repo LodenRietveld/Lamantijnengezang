@@ -1,14 +1,11 @@
 #include <Audio.h>
-#include <Wire.h>
-#include <SPI.h>
-#include <SD.h>
-#include <SerialFlash.h>
 #include "classes.h"
 
 #define HAL1_PIN                A0
 #define HAL2_PIN                A3
 #define HAL3_PIN                A4
 #define STRETCH_PIN             A2
+#define ON_OFF_PIN              2
 
 #define NUM_HAL_SENSORS         2
 #define MEAN_COUNT              50
@@ -38,10 +35,16 @@ N_VolumeInterpolator volume_interpolator(1, 0.1, 0.2);
 LPF hal1_deltaSmoother(0.9999);
 LPF hal2_deltaSmoother(0.9999);
 
+LPF volume_fade(0.99999);
+LPF btn_debounce(0.95);
+
 float parts[NUM_HAL_SENSORS][MEAN_COUNT] = {0};
 uint8_t part_idx = 0;
 float sensor_mean = 0.;
 float sensor_variance[NUM_HAL_SENSORS] = {0};
+
+float instr_volume = 0;
+bool changing_volume = false;
 
 elapsedMillis vibrato_timer = 0;
 float vibrato_phase = 0;
@@ -245,6 +248,9 @@ void setup() {
   mixer6.gain(2, 0.7);
   
   waveform_interpolator_sine.update();
+
+  pinMode(ON_OFF_PIN, INPUT_PULLUP);
+  btn_debounce.set_thresholds(0.3, 0.6);
 }
 
 uint16_t loopcount = 0;
@@ -262,6 +268,7 @@ void loop() {
   read_sensors_update_data_structures();
   set_values_and_interpolators();
   update_trackers(); 
+  change_volume();
 }
 
 void interpolate_waveforms(N_SineInterpolator* interpolator){
@@ -319,15 +326,16 @@ void set_filter_oscillator_freqs(){
 
 void set_effect_mixers(){
   float delta_diff = constrain(abs(hal1_deltaSmoother.get() - hal2_deltaSmoother.get()), 0., 1.);
+  float scaled_hal2_val = constrain(hal2.get_scaled_value() * 4, 0, 1);
   
   chorusMixer1.gain(0, delta_diff);
   chorusMixer1.gain(1, 1. - delta_diff);
   chorusMixer2.gain(0, delta_diff);
   chorusMixer2.gain(1, 1. - delta_diff);
-  verbMixerL.gain(1, 1. - hal1.get_scaled_value());
-  verbMixerL.gain(0, hal1.get_scaled_value());
-  verbMixerR.gain(1, 1. - hal1.get_scaled_value());
-  verbMixerR.gain(0, hal1.get_scaled_value());
+  verbMixerL.gain(1, scaled_hal2_val);
+  verbMixerL.gain(0, 1. - scaled_hal2_val);
+  verbMixerR.gain(1, scaled_hal2_val);
+  verbMixerR.gain(0, 1. - scaled_hal2_val);
   noise_mixer.gain(0, 1. - (hal1.get_scaled_value() / 5.));
   noise_mixer.gain(1, hal1.get_scaled_value() / 5.);
 }
@@ -342,8 +350,8 @@ void read_sensors_update_data_structures(){
       }
 
       
-      debug_print_value("val1", 0., 1., sensors[0]->get_scaled_value(), false);
-      debug_print_value("val2", 0., 1., sensors[1]->get_scaled_value(), true);
+//      debug_print_value("val1", 0., 1., sensors[0]->get_scaled_value(), false);
+//      debug_print_value("val2", 0., 1., sensors[1]->get_scaled_value(), true);
       
       calculate_sensor_variance();
       
@@ -355,6 +363,23 @@ void read_sensors_update_data_structures(){
 
   hal1_deltaSmoother.set_if_greater(hal1.get_delta());
   hal2_deltaSmoother.set_if_greater(hal2.get_delta());
+
+  btn_debounce.set_value(1 - digitalRead(ON_OFF_PIN));
+  btn_debounce.update_gate_value();
+
+  bool gate_c = btn_debounce.gate_changed();
+
+//  if (millis()%16 == 0 || gate_c){
+//    debug_print_value("btn_raw", 0, 1, 1 - digitalRead(ON_OFF_PIN), false, false);
+//    debug_print_value("btn_smth", 0, 1, btn_debounce.get(), false, false);
+//    debug_print_value("btn_gate", 0, 1, btn_debounce.get_gated_value(), false, false);
+//    debug_print_value("volume", 0, 0, volume_fade.get() + 1.5, true, false);
+//  }
+
+  if (gate_c){
+    instr_volume = (btn_debounce.get_gated_value() * 0.6) + 0.2;
+    changing_volume = true;
+  }
 }
 
 
@@ -433,27 +458,42 @@ float scale_STRETCH_values(uint16_t reading, float range){
 }
 
 
-float debug_print_value(char* label, float minval, float maxval, float val, bool line_end){
+float debug_print_value(char* label, float minval, float maxval, float val, bool line_end, bool min_max){
   char strbuf[100];
+
+  if (min_max){
+    strcpy(strbuf, label);
+    strcat(strbuf, "_min:");
+    Serial.print(strbuf);
+    Serial.print(minval);
+    
+    strcpy(strbuf, "\t");
+    strcat(strbuf, label);
+    strcat(strbuf, "_max:");
+    Serial.print(strbuf);
+    Serial.print(maxval);
   
-  strcpy(strbuf, label);
-  strcat(strbuf, "_min:");
-  Serial.print(strbuf);
-  Serial.print(minval);
-  
-  strcpy(strbuf, ",");
-  strcat(strbuf, label);
-  strcat(strbuf, "_max:");
-  Serial.print(strbuf);
-  Serial.print(maxval);
-  
-  Serial.print(",");
+    Serial.print("\t");
+  }
   Serial.print(label);
   Serial.print(":");
   if (line_end){
     Serial.println(val);
   } else {
     Serial.print(val);
-    Serial.print(",");
+    Serial.print("\t");
   }
+}
+
+void change_volume(){
+  if (changing_volume){
+    volume_fade.set_value(instr_volume);
+
+    if (volume_fade.get() == instr_volume){
+      changing_volume = false;
+    }
+  }
+
+  mixer6.gain(0, volume_fade.get());
+  mixer6.gain(1, volume_fade.get());
 }
